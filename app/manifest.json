@@ -1,0 +1,10 @@
+{
+  "name": "MeshLink — Bonded Network Control",
+  "short_name": "MeshLink",
+  "description": "Control plane for a bonded cellular mesh network with seamless failover.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220"
+}
