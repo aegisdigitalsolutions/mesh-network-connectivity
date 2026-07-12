@@ -19,6 +19,7 @@ export function Dashboard() {
   const [snapshot, setSnapshot] = useState<MeshSnapshot>(EMPTY_SNAPSHOT)
   const [history, setHistory] = useState<number[]>(() => Array(HISTORY_LEN).fill(0))
   const [state, setState] = useState<ConnectionState>('disconnected')
+  const [error, setError] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [config, setConfig] = useState<BondConfig | null>(null)
   const clientRef = useRef(getMeshClient())
@@ -53,12 +54,19 @@ export function Dashboard() {
     }
   }, [connect])
 
-  // Telemetry poll loop — always running, driven by the active client.
+  // Telemetry poll loop — always running, driven by the active client. It also
+  // re-reads the connection state every tick: the native bond connects (and can
+  // fail) asynchronously, so the UI must track the live state, not just the
+  // value captured right after connect() resolved. This is what lets the button
+  // leave "Establishing bond…" and land on connected/error on its own.
   useEffect(() => {
     const interval = setInterval(() => {
       const snap = clientRef.current.poll()
       setSnapshot(snap)
       setHistory((h) => [...h.slice(1), snap.aggregateDown])
+      setState(clientRef.current.getState())
+      if (snap.error) setError(snap.error)
+      else if (clientRef.current.getState() === 'connected') setError(null)
     }, 1200)
     return () => clearInterval(interval)
   }, [])

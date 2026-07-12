@@ -22,7 +22,14 @@ class BondVpnService : VpnService() {
         private const val NOTIF_ID = 1001
         private const val FD_HELPER_NAME = "meshlink-fd-helper"
 
+        // How long to wait for a real tunnel path before giving up. A full-tunnel
+        // VPN with no reachable server blackholes ALL traffic, so we must bail out
+        // and tear down instead of spinning forever.
+        private const val CONNECT_TIMEOUT_MS = 20_000L
+        private const val WATCHDOG_POLL_MS = 1_000L
+
         @Volatile var state: String = "disconnected"; private set
+        @Volatile var lastError: String? = null; private set
         private val snapshotRef = AtomicReference(JSObject())
         var snapshotListener: ((JSObject) -> Unit)? = null
 
@@ -58,6 +65,7 @@ class BondVpnService : VpnService() {
 
         startForeground(NOTIF_ID, buildNotification("Connecting…"))
         state = "connecting"
+        lastError = null
         pushSnapshot()
 
         thread(name = "meshlink-connect") {
@@ -65,18 +73,76 @@ class BondVpnService : VpnService() {
                 acquireNetworks()
                 startFdHelper()
                 establishAndLaunch(host, port, key)
-                startTelemetry()
-                state = "connected"
-                updateNotification("Bonded tunnel active")
+
+                // Do NOT report "connected" yet — glorytun has launched but no
+                // path to the server exists. Wait for a real tunnel before we
+                // let the UI (and the user) believe traffic is flowing.
+                if (awaitTunnel()) {
+                    startTelemetry()
+                    state = "connected"
+                    updateNotification("Bonded tunnel active")
+                } else {
+                    Log.e(TAG, "no tunnel within ${CONNECT_TIMEOUT_MS}ms — tearing down")
+                    lastError = "Couldn't reach server $host:$port. Check the server is running and UDP $port is open."
+                    teardown()          // restores normal connectivity (sets disconnected)
+                    state = "error"     // ...then land on error so the UI shows why
+                    stopSelf()
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "connect failed", e)
-                state = "error"
+                lastError = e.message ?: "Connection failed"
                 teardown()
+                state = "error"
                 stopSelf()
             }
             pushSnapshot()
         }
         return START_STICKY
+    }
+
+    /**
+     * Polls glorytun until a real tunnel path is established or the timeout
+     * elapses. Returns true only when the tunnel is actually usable. This is the
+     * safety-net that prevents a full-tunnel VPN from blackholing the device
+     * forever when the server is unreachable (e.g. blocked UDP port).
+     */
+    private fun awaitTunnel(): Boolean {
+        val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
+        while (running && System.currentTimeMillis() < deadline) {
+            if (tunnelEstablished(runCtl("show") ?: "")) {
+                Log.i(TAG, "tunnel established")
+                return true
+            }
+            try { Thread.sleep(WATCHDOG_POLL_MS) } catch (_: InterruptedException) { return false }
+        }
+        return false
+    }
+
+    /**
+     * A tunnel is considered up once glorytun negotiates with the peer. Before
+     * the handshake the peer/MTU are unset (remote 0.0.0.0, mtu 0); after it,
+     * the MTU is populated and/or bytes have moved. We accept several signals so
+     * we're not brittle against glorytun's exact `show` formatting.
+     */
+    private fun tunnelEstablished(show: String): Boolean {
+        if (show.isBlank()) return false
+        for (raw in show.lineSequence()) {
+            val line = raw.trim()
+            when {
+                // A real, negotiated MTU (was 0 while idle).
+                line.startsWith("mtu") -> {
+                    val v = line.split(Regex("\\s+")).getOrNull(1)?.toIntOrNull() ?: 0
+                    if (v > 0) return true
+                }
+                // A remote that isn't the unset placeholder.
+                line.startsWith("remote") &&
+                    !line.contains("0.0.0.0") && Regex("\\d+\\.\\d+\\.\\d+\\.\\d+").containsMatchIn(line) -> return true
+                // An explicitly up/OK path row.
+                Regex("\\b(up|ok)\\b", RegexOption.IGNORE_CASE).containsMatchIn(line) &&
+                    Regex("\\d+\\.\\d+\\.\\d+\\.\\d+").containsMatchIn(line) -> return true
+            }
+        }
+        return false
     }
 
     override fun onRevoke() { teardown(); stopSelf() }
@@ -270,6 +336,7 @@ class BondVpnService : VpnService() {
                         put("uplinks", uplinks)
                         put("serverHost", "159.203.67.127")
                         put("timestamp", System.currentTimeMillis())
+                        lastError?.let { put("error", it) }
                     }
                     snapshotRef.set(snap)
                     snapshotListener?.invoke(snap)
@@ -294,7 +361,10 @@ class BondVpnService : VpnService() {
     }
 
     private fun pushSnapshot() {
-        val snap = snapshotRef.get().apply { put("state", state) }
+        val snap = snapshotRef.get().apply {
+            put("state", state)
+            lastError?.let { put("error", it) }
+        }
         snapshotRef.set(snap); snapshotListener?.invoke(snap)
     }
 

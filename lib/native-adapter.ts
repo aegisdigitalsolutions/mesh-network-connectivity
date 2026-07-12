@@ -52,6 +52,7 @@ interface NativeSnapshot {
   devices?: NativeDevice[]
   serverHost: string
   timestamp: number
+  error?: string
 }
 
 interface NativePlugin {
@@ -107,6 +108,7 @@ function resolvePlugin(cap: CapacitorRuntime): NativePlugin | undefined {
 let currentUplinks: Uplink[] = []
 let currentDevices: MeshDevice[] = []
 let currentState: ConnectionState = 'disconnected'
+let currentError: string | undefined
 
 function mapStatus(status: string, enabled: boolean): LinkStatus {
   if (!enabled || status === 'disabled' || status === 'down') return 'down'
@@ -159,10 +161,12 @@ function applyNative(ns: NativeSnapshot): void {
   currentUplinks = (ns.uplinks ?? []).map(mapUplink)
   currentDevices = (ns.devices ?? []).map(mapDevice)
   currentState = ns.state
+  currentError = ns.error
 }
 
 function snapshot(): MeshSnapshot {
-  return buildSnapshot(currentUplinks, currentDevices)
+  const base = buildSnapshot(currentUplinks, currentDevices)
+  return currentError ? { ...base, error: currentError } : base
 }
 
 let installed = false

@@ -40,6 +40,9 @@ export interface MeshSnapshot {
   aggregateUp: number
   activeLinks: number
   failoverArmed: boolean
+  // Populated by the native bond when a connection attempt fails, so the UI
+  // can explain why instead of silently spinning.
+  error?: string
 }
 
 // No preset gear. Uplinks and devices populate from live telemetry only —
