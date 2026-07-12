@@ -6,11 +6,12 @@
 // installs window.MeshBonding with the exact NativeBonding contract that
 // mesh-client.ts expects, translating native radio telemetry into UI Uplinks.
 //
-// On the web (v0 preview / static export in a browser) Capacitor reports a
-// non-native platform, so installNativeBridge() is a no-op and the app stays in
+// Dependency-free by design: instead of importing "@capacitor/core" (which the
+// web bundle does not ship), it reads the `window.Capacitor` runtime that the
+// native Android shell injects. On the web (v0 preview / static export) that
+// global is absent, so installNativeBridge() is a no-op and the app stays in
 // simulation mode. It only activates inside the installed Android APK.
 
-import { Capacitor, registerPlugin } from '@capacitor/core'
 import {
   INITIAL_UPLINKS,
   INITIAL_DEVICES,
@@ -48,6 +49,18 @@ interface NativePlugin {
   getState(): Promise<{ state: ConnectionState }>
   setUplinkEnabled(opts: { id: string; enabled: boolean }): Promise<void>
   addListener(event: string, cb: (data: NativeSnapshot) => void): void
+}
+
+// The Capacitor runtime object injected by the native WebView. Only the members
+// this adapter needs are declared.
+interface CapacitorRuntime {
+  isNativePlatform?: () => boolean
+  registerPlugin?: <T>(name: string) => T
+}
+
+function getCapacitor(): CapacitorRuntime | undefined {
+  if (typeof window === 'undefined') return undefined
+  return (window as unknown as { Capacitor?: CapacitorRuntime }).Capacitor
 }
 
 // Which native radio feeds each UI uplink slot. On the host phone the Wi-Fi
@@ -102,10 +115,12 @@ let installed = false
 export function installNativeBridge(): void {
   if (installed) return
   if (typeof window === 'undefined') return
-  if (!Capacitor.isNativePlatform()) return // browser -> simulation mode
+
+  const cap = getCapacitor()
+  if (!cap?.isNativePlatform?.() || !cap.registerPlugin) return // browser -> simulation
   installed = true
 
-  const native = registerPlugin<NativePlugin>('MeshBonding')
+  const native = cap.registerPlugin<NativePlugin>('MeshBonding')
 
   native.addListener('meshSnapshot', (s) => applyNative(s))
   // Prime the cache in case the app was relaunched while the VPN was already up.
