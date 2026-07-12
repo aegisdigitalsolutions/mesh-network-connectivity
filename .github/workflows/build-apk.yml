@@ -44,6 +44,23 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      # Capacitor 7 pulls kotlin-stdlib:1.8.22 while older transitive deps drag in
+      # kotlin-stdlib-jdk7/jdk8:1.6.21. In Kotlin 1.8+ the jdk7/jdk8 classes were merged
+      # into the main stdlib, so both on the classpath = duplicate classes. Force one version.
+      - name: Fix Kotlin stdlib version conflict
+        run: |
+          cat >> android/app/build.gradle <<'EOF'
+
+          configurations.all {
+              resolutionStrategy {
+                  force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+              }
+          }
+          EOF
+          echo "Appended Kotlin resolutionStrategy to android/app/build.gradle"
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
