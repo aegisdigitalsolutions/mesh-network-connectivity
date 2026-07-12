@@ -1,0 +1,32 @@
+<!--
+  MeshLink native additions.
+  MERGE these into android/app/src/main/AndroidManifest.xml after `cap add android`.
+  (The CI workflow does this automatically via a patch step - see build-apk.yml.)
+-->
+
+<!-- Permissions: place inside <manifest>, before <application> -->
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+<uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+<!-- Needed to share connectivity to peers (Stage 3): -->
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+<uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+
+<!-- Service: place inside <application> -->
+<service
+    android:name="com.meshlink.app.bond.BondVpnService"
+    android:permission="android.permission.BIND_VPN_SERVICE"
+    android:foregroundServiceType="specialUse"
+    android:exported="false">
+    <intent-filter>
+        <action android:name="android.net.VpnService" />
+    </intent-filter>
+    <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Network connection bonding VPN" />
+</service>
