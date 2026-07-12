@@ -56,7 +56,7 @@ interface NativeSnapshot {
 }
 
 interface NativePlugin {
-  connect(opts: { host: string; port: number; key: string }): Promise<void>
+  connect(opts: { host: string; port: number; key: string; accelerator?: boolean }): Promise<void>
   disconnect(): Promise<void>
   getSnapshot(): Promise<NativeSnapshot>
   getState(): Promise<{ state: ConnectionState }>

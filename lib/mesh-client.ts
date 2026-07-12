@@ -75,7 +75,7 @@ class SimulatedMeshClient implements MeshClient {
 // ---- Native bridge client (Capacitor build) ----
 // Expected shape of the injected plugin. Implemented in Kotlin/Swift.
 interface NativeBonding {
-  connect(opts: { host: string; port: number; key: string }): Promise<void>
+  connect(opts: { host: string; port: number; key: string; accelerator: boolean }): Promise<void>
   disconnect(): Promise<void>
   getSnapshot(): MeshSnapshot
   getState(): ConnectionState
@@ -93,7 +93,12 @@ class NativeMeshClient implements MeshClient {
   constructor(private native: NativeBonding) {}
 
   async connect(config: BondConfig): Promise<void> {
-    await this.native.connect({ host: config.host, port: config.port, key: config.key })
+    await this.native.connect({
+      host: config.host,
+      port: config.port,
+      key: config.key,
+      accelerator: config.accelerator,
+    })
   }
   async disconnect(): Promise<void> {
     await this.native.disconnect()

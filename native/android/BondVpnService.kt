@@ -62,6 +62,7 @@ class BondVpnService : VpnService() {
         val host = intent?.getStringExtra("host") ?: return START_NOT_STICKY
         val port = intent.getIntExtra("port", 5000)
         val key  = intent.getStringExtra("key") ?: return START_NOT_STICKY
+        val accelerator = intent.getBooleanExtra("accelerator", true)
 
         startForeground(NOTIF_ID, buildNotification("Connecting…"))
         state = "connecting"
@@ -72,7 +73,7 @@ class BondVpnService : VpnService() {
             try {
                 acquireNetworks()
                 startFdHelper()
-                establishAndLaunch(host, port, key)
+                establishAndLaunch(host, port, key, accelerator)
 
                 // Do NOT report "connected" yet — glorytun has launched but no
                 // path to the server exists. Wait for a real tunnel before we
@@ -231,14 +232,22 @@ class BondVpnService : VpnService() {
 
     // ------------------------------------------------------------ tunnel
 
-    private fun establishAndLaunch(host: String, port: Int, key: String) {
+    private fun establishAndLaunch(host: String, port: Int, key: String, accelerator: Boolean) {
+        // Accelerator ON: a larger tunnel MTU (1400) matched to the server-side
+        // TCP MSS clamp in accelerator-tune.sh — fewer packets, higher throughput.
+        // OFF: a conservative 1280 that traverses any path but carries more
+        // per-packet overhead. This is a glorytun-safe knob (the tun's own MTU),
+        // so we never risk feeding glorytun an unrecognized CLI flag.
+        val mtu = if (accelerator) 1400 else 1280
+        Log.i(TAG, "establish: accelerator=$accelerator mtu=$mtu")
+
         val builder = Builder()
             .setSession("MeshLink")
             .addAddress("10.99.0.2", 24)
             .addRoute("0.0.0.0", 0)
             .addDnsServer("1.1.1.1")
             .addDnsServer("9.9.9.9")
-            .setMtu(1400)
+            .setMtu(mtu)
             .allowBypass()
 
         // Gate 1 loop-prevention: the glorytun subprocess runs under our own UID.

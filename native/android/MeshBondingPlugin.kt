@@ -32,10 +32,11 @@ class MeshBondingPlugin : Plugin() {
         val host = call.getString("host") ?: return call.reject("host required")
         val key  = call.getString("key")  ?: return call.reject("key required")
         val i = Intent(context, BondVpnService::class.java).apply {
-            putExtra("host", host)
-            putExtra("port", call.getInt("port") ?: 5000)
-            putExtra("key", key)
-        }
+      putExtra("host", host)
+      putExtra("port", call.getInt("port") ?: 5000)
+      putExtra("key", key)
+      putExtra("accelerator", call.getBoolean("accelerator") ?: true)
+    }
         context.startForegroundService(i)
         call.resolve()
     }

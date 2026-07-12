@@ -10,6 +10,9 @@ export interface BondConfig {
   key: string
   // Auto-start the bond when the app launches
   autoConnect: boolean
+  // "Accelerator" — request the optimized transport profile (larger buffers,
+  // MTU probing) to pair with the server-side tuning in accelerator-tune.sh.
+  accelerator: boolean
 }
 
 export const DEFAULT_CONFIG: BondConfig = {
@@ -18,6 +21,7 @@ export const DEFAULT_CONFIG: BondConfig = {
   port: 5000,
   key: '',
   autoConnect: false,
+  accelerator: true,
 }
 
 const STORAGE_KEY = 'meshlink.bondConfig.v1'

@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Activity, RadioTower, Settings, Power, Loader2 } from 'lucide-react'
+import { Activity, RadioTower, Settings, Power, Loader2, AlertTriangle } from 'lucide-react'
 import { buildSnapshot, type MeshSnapshot } from '@/lib/mesh-data'
 import { getMeshClient, type ConnectionState } from '@/lib/mesh-client'
 import { loadConfig, isConfigured, type BondConfig } from '@/lib/mesh-config'
@@ -32,11 +32,13 @@ export function Dashboard() {
       return
     }
     setState('connecting')
+    setError(null)
     try {
       await clientRef.current.connect(cfg)
       setState(clientRef.current.getState())
-    } catch {
+    } catch (e) {
       setState('error')
+      setError(e instanceof Error ? e.message : 'Connection failed')
     }
   }, [])
 
@@ -115,6 +117,19 @@ export function Dashboard() {
         onDisconnect={disconnect}
         onConfigure={() => setSettingsOpen(true)}
       />
+
+      {error && state !== 'connected' && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-2xl border border-destructive/40 bg-destructive/10 px-3 py-2.5"
+        >
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <div className="flex flex-col">
+            <span className="text-sm font-medium text-destructive">Connection failed</span>
+            <span className="font-mono text-[11px] leading-relaxed text-destructive/80">{error}</span>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between px-1">
         <h2 className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Uplinks</h2>
