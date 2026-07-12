@@ -14,13 +14,19 @@
 # are written to /etc/sysctl.d so they survive reboots.
 #
 # Usage (on the droplet, as root):
-#   bash accelerator-tune.sh            # apply
+#   bash accelerator-tune.sh            # apply once, now
+#   bash accelerator-tune.sh --install  # apply now AND on every boot (systemd)
 #   bash accelerator-tune.sh --status   # show current values, change nothing
-#   bash accelerator-tune.sh --revert   # remove MeshLink tuning
+#   bash accelerator-tune.sh --revert   # remove tuning (and the boot service)
+#
+# Run --install ONCE. After that the accelerator re-applies automatically every
+# time the droplet reboots or glorytun restarts, so you never have to remember.
 #
 set -euo pipefail
 
 SYSCTL_FILE="/etc/sysctl.d/99-meshlink-accelerator.conf"
+SERVICE_FILE="/etc/systemd/system/meshlink-accelerator.service"
+SELF_PATH="/usr/local/sbin/meshlink-accelerator.sh"
 TUN_MTU="${TUN_MTU:-1400}"          # must match the glorytun tun MTU
 GT_PORT="${GT_PORT:-5000}"          # glorytun UDP port (matches the app default)
 
@@ -42,9 +48,47 @@ show_status() {
 
 revert() {
   need_root
+  # Tear down the boot service first, if present.
+  if [ -f "$SERVICE_FILE" ]; then
+    systemctl disable --now meshlink-accelerator.service >/dev/null 2>&1 || true
+    rm -f "$SERVICE_FILE" "$SELF_PATH"
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    echo "==> Removed boot service meshlink-accelerator.service"
+  fi
   rm -f "$SYSCTL_FILE"
   sysctl --system >/dev/null 2>&1 || true
   echo "==> Removed $SYSCTL_FILE and reloaded sysctl. (qdisc/cc revert on reboot.)"
+}
+
+install_service() {
+  need_root
+  # Apply immediately so it's live right now...
+  apply
+  # ...then persist a copy of this script and a systemd unit that re-runs it on
+  # every boot (After=network + glorytun so tun0 exists when we clamp MSS).
+  echo
+  echo "==> Installing boot service so the accelerator re-applies automatically"
+  cp -f "$0" "$SELF_PATH"
+  chmod +x "$SELF_PATH"
+  cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=MeshLink Accelerator (network tuning for glorytun bond)
+After=network-online.target glorytun.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Re-assert sysctl + MSS clamp. Idempotent, so safe to run every boot.
+ExecStart=/usr/bin/env TUN_MTU=${TUN_MTU} GT_PORT=${GT_PORT} bash ${SELF_PATH} apply
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable meshlink-accelerator.service >/dev/null 2>&1 || true
+  echo "    enabled meshlink-accelerator.service (runs on every boot)"
+  echo "    check anytime with: systemctl status meshlink-accelerator"
 }
 
 apply() {
@@ -120,6 +164,7 @@ EOF
 case "${1:-apply}" in
   --status) show_status ;;
   --revert) revert ;;
+  --install) install_service ;;
   apply|"") apply ;;
-  *) echo "Usage: accelerator-tune.sh [--status|--revert]"; exit 1 ;;
+  *) echo "Usage: accelerator-tune.sh [--install|--status|--revert]"; exit 1 ;;
 esac
