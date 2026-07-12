@@ -23,6 +23,18 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
+    <!-- MeshDrop media sharing. Android 13+ (API 33) uses granular media
+         permissions; older devices fall back to READ_EXTERNAL_STORAGE capped
+         at API 32 so Play/lint don't flag it. Picking via the system picker
+         needs no permission, but these let us read the gallery for previews
+         and let the user grant access when prompted. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <!-- Service: merger inserts this into <application> -->
     <service
         android:name="com.meshlink.app.bond.BondVpnService"
