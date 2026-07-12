@@ -52,15 +52,42 @@ interface NativePlugin {
 }
 
 // The Capacitor runtime object injected by the native WebView. Only the members
-// this adapter needs are declared.
+// this adapter needs are declared. Note: `registerPlugin` is a @capacitor/core
+// export and is NOT guaranteed to exist on the natively-injected global — the
+// reliably-present surface is `Plugins` + `isNativePlatform`/`getPlatform`.
 interface CapacitorRuntime {
   isNativePlatform?: () => boolean
+  getPlatform?: () => string
   registerPlugin?: <T>(name: string) => T
+  Plugins?: Record<string, unknown>
 }
 
 function getCapacitor(): CapacitorRuntime | undefined {
   if (typeof window === 'undefined') return undefined
   return (window as unknown as { Capacitor?: CapacitorRuntime }).Capacitor
+}
+
+function isNative(cap: CapacitorRuntime | undefined): boolean {
+  if (!cap) return false
+  try {
+    if (typeof cap.isNativePlatform === 'function') return cap.isNativePlatform()
+    if (typeof cap.getPlatform === 'function') return cap.getPlatform() !== 'web'
+  } catch {
+    /* fall through */
+  }
+  // If a Plugins bag with our plugin exists, we're clearly in the native shell.
+  return !!cap.Plugins && 'MeshBonding' in cap.Plugins
+}
+
+// Resolve the native plugin proxy without depending on registerPlugin being
+// present on the injected global. Prefer the always-populated Plugins bag.
+function resolvePlugin(cap: CapacitorRuntime): NativePlugin | undefined {
+  const fromBag = cap.Plugins?.['MeshBonding'] as NativePlugin | undefined
+  if (fromBag) return fromBag
+  if (typeof cap.registerPlugin === 'function') {
+    return cap.registerPlugin<NativePlugin>('MeshBonding')
+  }
+  return undefined
 }
 
 // Which native radio feeds each UI uplink slot. On the host phone the Wi-Fi
@@ -117,10 +144,11 @@ export function installNativeBridge(): void {
   if (typeof window === 'undefined') return
 
   const cap = getCapacitor()
-  if (!cap?.isNativePlatform?.() || !cap.registerPlugin) return // browser -> simulation
-  installed = true
+  if (!isNative(cap) || !cap) return // browser -> simulation
 
-  const native = cap.registerPlugin<NativePlugin>('MeshBonding')
+  const native = resolvePlugin(cap)
+  if (!native) return // native shell but plugin missing -> stay simulated
+  installed = true
 
   native.addListener('meshSnapshot', (s) => applyNative(s))
   // Prime the cache in case the app was relaunched while the VPN was already up.
