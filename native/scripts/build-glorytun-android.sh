@@ -31,9 +31,11 @@ cd "$WORK"
 curl -fsSL "$LIBSODIUM_TARBALL" -o libsodium.tar.gz
 tar xzf libsodium.tar.gz
 cd libsodium-stable
-# android-armv8-a.sh reads ANDROID_NDK_HOME and emits a static libsodium.a
-# into ./libsodium-android-armv8-a+crypto/{lib,include}.
-ANDROID_NDK_HOME="$ANDROID_NDK_HOME" ./dist-build/android-armv8-a.sh
+# android-armv8-a.sh reads ANDROID_NDK_HOME + NDK_PLATFORM and emits a static
+# libsodium.a into ./libsodium-android-armv8-a+crypto/{lib,include}.
+# NDK_PLATFORM selects the min API level; without it the script aborts.
+ANDROID_NDK_HOME="$ANDROID_NDK_HOME" NDK_PLATFORM="android-${API}" \
+    ./dist-build/android-armv8-a.sh
 
 SODIUM_A="$(find "$WORK/libsodium-stable" -name libsodium.a | head -1)"
 [ -n "$SODIUM_A" ] || { echo "!! libsodium.a not produced"; exit 1; }
