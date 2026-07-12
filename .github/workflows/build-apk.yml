@@ -90,7 +90,20 @@ jobs:
             sed -i "0,/apply plugin: 'com.android.application'/s//apply plugin: 'com.android.application'\napply plugin: 'kotlin-android'/" \
               android/app/build.gradle
           fi
+          # Kotlin 1.8.22 supports JVM targets only up to 17. The runner uses
+          # Java 21, so Gradle would ask Kotlin to target JVM 21 (unsupported).
+          # Pin both Java and Kotlin compilation to 17 (Java 21 runs it fine).
           cat >> android/app/build.gradle <<EOF
+
+          android {
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
 
           dependencies {
               implementation "org.jetbrains.kotlin:kotlin-stdlib:${KOTLIN_VERSION}"
