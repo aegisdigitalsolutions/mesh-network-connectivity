@@ -1,0 +1,63 @@
+name: Build MeshLink APK
+
+# Trigger this from your phone: GitHub repo -> Actions tab -> "Build MeshLink APK"
+# -> "Run workflow". When it finishes, download the APK from the run's Artifacts.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install web dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Install Capacitor
+        run: pnpm add @capacitor/core @capacitor/cli @capacitor/android
+
+      - name: Build static web export
+        env:
+          CAPACITOR_BUILD: '1'
+        run: pnpm build
+
+      - name: Add Android platform
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MeshLink-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
