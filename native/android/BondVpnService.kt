@@ -400,7 +400,8 @@ class BondVpnService : VpnService() {
      * Safe to call before every connect AND on teardown (idempotent).
      */
     private fun killLeftoverProcess() {
-        glorytun?.let { proc ->
+        val proc = glorytun
+        if (proc != null) {
             try {
                 proc.destroy()
                 if (!proc.waitFor(1500, java.util.concurrent.TimeUnit.MILLISECONDS)) {
