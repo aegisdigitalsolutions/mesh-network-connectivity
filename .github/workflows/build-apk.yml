@@ -44,6 +44,59 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      # ---- Stage 2 native bonding engine -------------------------------------
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Install native sources into Android project
+        run: |
+          set -euo pipefail
+          PKG_DIR="android/app/src/main/java/com/meshlink/app/bond"
+          mkdir -p "$PKG_DIR"
+          cp native/android/BondVpnService.kt    "$PKG_DIR/"
+          cp native/android/MeshBondingPlugin.kt "$PKG_DIR/"
+          # Overwrite the generated MainActivity so the plugin is registered.
+          cp native/android/MainActivity.java \
+            android/app/src/main/java/com/meshlink/app/MainActivity.java
+
+      - name: Merge manifest additions
+        run: |
+          python3 native/scripts/merge-manifest.py \
+            android/app/src/main/AndroidManifest.xml \
+            native/android/AndroidManifest.additions.xml
+
+      - name: Build glorytun (patched, arm64, static)
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: bash native/scripts/build-glorytun-android.sh
+
+      - name: Verify native payload
+        run: |
+          set -euo pipefail
+          BIN="android/app/src/main/jniLibs/arm64-v8a/libglorytun.so"
+          test -f "$BIN" || { echo "::error::libglorytun.so missing"; exit 1; }
+          file "$BIN" | grep -q aarch64 || { echo "::error::wrong arch"; exit 1; }
+          grep -q 'extractNativeLibs="true"' android/app/src/main/AndroidManifest.xml \
+            || { echo "::error::extractNativeLibs missing"; exit 1; }
+
+      - name: Force legacy native lib packaging
+        run: |
+          cat >> android/app/build.gradle <<'EOF'
+
+          android {
+              packagingOptions {
+                  jniLibs {
+                      useLegacyPackaging = true
+                  }
+              }
+          }
+          EOF
+      # ------------------------------------------------------------------------
+
       # Capacitor 7 pulls kotlin-stdlib:1.8.22 while older transitive deps drag in
       # kotlin-stdlib-jdk7/jdk8:1.6.21. In Kotlin 1.8+ the jdk7/jdk8 classes were merged
       # into the main stdlib, so both on the classpath = duplicate classes. Force one version.

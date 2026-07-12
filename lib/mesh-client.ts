@@ -16,6 +16,7 @@ import {
   type MeshSnapshot,
 } from './mesh-data'
 import type { BondConfig } from './mesh-config'
+import { installNativeBridge } from './native-adapter'
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
@@ -115,10 +116,15 @@ let client: MeshClient | null = null
 // plugin installed, otherwise the in-browser simulation.
 export function getMeshClient(): MeshClient {
   if (client) return client
-  if (typeof window !== 'undefined' && window.MeshBonding) {
-    client = new NativeMeshClient(window.MeshBonding)
-  } else {
-    client = new SimulatedMeshClient()
+  if (typeof window !== 'undefined') {
+    // Installs window.MeshBonding when inside the native Android shell.
+    // No-op in the browser, so the preview stays in simulation mode.
+    installNativeBridge()
+    if (window.MeshBonding) {
+      client = new NativeMeshClient(window.MeshBonding)
+      return client
+    }
   }
+  client = new SimulatedMeshClient()
   return client
 }

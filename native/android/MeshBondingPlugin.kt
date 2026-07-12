@@ -3,94 +3,61 @@ package com.meshlink.app.bond
 import android.app.Activity
 import android.content.Intent
 import android.net.VpnService
-import com.getcapacitor.JSObject
-import com.getcapacitor.Plugin
-import com.getcapacitor.PluginCall
-import com.getcapacitor.PluginMethod
+import androidx.activity.result.ActivityResult
+import com.getcapacitor.*
+import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 
-/**
- * Capacitor bridge that the web app (lib/mesh-client.ts -> NativeMeshClient) calls.
- * It implements the exact NativeBonding contract:
- *   window.MeshBonding.connect({ host, port, key })
- *   window.MeshBonding.disconnect()
- *   window.MeshBonding.getTelemetry()
- *
- * When this plugin is present, mesh-client.ts automatically switches from the
- * simulated client to the native one. No web code changes are required.
- */
 @CapacitorPlugin(name = "MeshBonding")
 class MeshBondingPlugin : Plugin() {
 
-    private var pendingCall: PluginCall? = null
+    override fun load() {
+        BondVpnService.snapshotListener = { snap -> notifyListeners("meshSnapshot", snap) }
+    }
 
     @PluginMethod
     fun connect(call: PluginCall) {
-        val host = call.getString("host")
-        val port = call.getInt("port", 5000)!!
-        val key = call.getString("key")
-        if (host.isNullOrBlank() || key.isNullOrBlank()) {
-            call.reject("host and key are required")
-            return
-        }
-
-        // Android requires user consent for VpnService on first use.
-        val prepare = VpnService.prepare(context)
-        if (prepare != null) {
-            pendingCall = call
-            call.setKeepAlive(true)
-            // 0x1001 is an arbitrary request code handled in handleOnActivityResult.
-            startActivityForResult(call, prepare, "onVpnPermission")
-            return
-        }
-        launchService(host, port, key, call)
+        val prep = VpnService.prepare(activity)
+        if (prep != null) startActivityForResult(call, prep, "vpnConsentResult")
+        else startBond(call)
     }
 
-    private fun launchService(host: String, port: Int, key: String, call: PluginCall) {
-        val intent = Intent(context, BondVpnService::class.java).apply {
-            action = BondVpnService.ACTION_CONNECT
-            putExtra(BondVpnService.EXTRA_HOST, host)
-            putExtra(BondVpnService.EXTRA_PORT, port)
-            putExtra(BondVpnService.EXTRA_KEY_HEX, key)
+    @ActivityCallback
+    private fun vpnConsentResult(call: PluginCall, result: ActivityResult) {
+        if (result.resultCode == Activity.RESULT_OK) startBond(call)
+        else call.reject("VPN consent denied by user")
+    }
+
+    private fun startBond(call: PluginCall) {
+        val host = call.getString("host") ?: return call.reject("host required")
+        val key  = call.getString("key")  ?: return call.reject("key required")
+        val i = Intent(context, BondVpnService::class.java).apply {
+            putExtra("host", host)
+            putExtra("port", call.getInt("port") ?: 5000)
+            putExtra("key", key)
         }
-        context.startForegroundService(intent)
-        val result = JSObject().apply { put("state", "connecting") }
-        call.resolve(result)
+        context.startForegroundService(i)
+        call.resolve()
     }
 
     @PluginMethod
     fun disconnect(call: PluginCall) {
-        val intent = Intent(context, BondVpnService::class.java).apply {
-            action = BondVpnService.ACTION_DISCONNECT
-        }
-        context.startService(intent)
-        call.resolve(JSObject().apply { put("state", "disconnected") })
+        context.startService(Intent(context, BondVpnService::class.java).setAction("STOP"))
+        call.resolve()
     }
 
-    /**
-     * Telemetry hook. Right now returns a placeholder; the next-stage native code
-     * should parse `glorytun path` / `glorytun show` output (per-link bytes, RTT)
-     * and return real numbers matching the LinkTelemetry shape in lib/mesh-data.ts.
-     */
     @PluginMethod
-    fun getTelemetry(call: PluginCall) {
-        val result = JSObject().apply {
-            put("connected", true)
-            put("note", "wire glorytun path/show parsing here - see HANDOFF.md")
-        }
-        call.resolve(result)
-    }
+    fun getSnapshot(call: PluginCall) = call.resolve(BondVpnService.latestSnapshotJson())
 
-    // Capacitor callback for the VpnService consent dialog result.
-    @Suppress("unused")
-    fun onVpnPermission(call: PluginCall, result: androidx.activity.result.ActivityResult) {
-        if (result.resultCode == Activity.RESULT_OK) {
-            val host = call.getString("host")!!
-            val port = call.getInt("port", 5000)!!
-            val key = call.getString("key")!!
-            launchService(host, port, key, call)
-        } else {
-            call.reject("VPN permission denied by user")
-        }
+    @PluginMethod
+    fun getState(call: PluginCall) =
+        call.resolve(JSObject().put("state", BondVpnService.state))
+
+    @PluginMethod
+    fun setUplinkEnabled(call: PluginCall) {
+        val id = call.getString("id") ?: return call.reject("id required")
+        val enabled = call.getBoolean("enabled") ?: return call.reject("enabled required")
+        BondVpnService.setUplinkEnabled(id, enabled)
+        call.resolve()
     }
 }

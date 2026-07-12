@@ -1,68 +1,54 @@
 #!/usr/bin/env bash
-#
-# Cross-compile glorytun for Android arm64-v8a using the NDK, and place it where
-# Android will extract it as an executable (jniLibs/<abi>/libglorytun.so).
-#
-# Runs in CI (see .github/workflows/build-apk.yml) AFTER `cap add android`.
-# Requires: $ANDROID_NDK_HOME (setup-android provides it), git, meson, ninja.
-#
-# ============================================================================
-# HONEST STATUS (see native/HANDOFF.md):
-# This script compiles UPSTREAM glorytun, which opens its own tun device and will
-# NOT work unrooted on Android as-is. The next environment must apply the "external
-# fd" patch (native/patches/glorytun-android-fd.patch - TO BE WRITTEN) before this
-# binary is functional. The compile itself is correct; the source needs the patch.
-# ============================================================================
 set -euo pipefail
 
-ABI="arm64-v8a"
-API=24
-NDK="${ANDROID_NDK_HOME:?ANDROID_NDK_HOME not set}"
-TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
-TARGET="aarch64-linux-android"
+# Builds static arm64 glorytun with Android patches; installs to jniLibs
+# (the only location Android grants exec permission on targetSdk >= 29).
+# Requires: ANDROID_NDK_HOME, git, make. Run from repo root after `cap add android`.
 
-export AR="$TOOLCHAIN/bin/llvm-ar"
-export CC="$TOOLCHAIN/bin/${TARGET}${API}-clang"
-export CXX="$TOOLCHAIN/bin/${TARGET}${API}-clang++"
-export STRIP="$TOOLCHAIN/bin/llvm-strip"
-
+GLORYTUN_REPO="https://github.com/angt/glorytun.git"
+GLORYTUN_TAG="v0.3.4"                       # PINNED — patches target this tag
+API=29
+ABI=aarch64-linux-android
+OUT_DIR="android/app/src/main/jniLibs/arm64-v8a"
 WORK="$(mktemp -d)"
-echo "Working in $WORK"
-cd "$WORK"
+ROOT="$(pwd)"
 
-git clone --recursive https://github.com/angt/glorytun.git
-cd glorytun
+trap 'rm -rf "$WORK"' EXIT
 
-# --- PATCH HOOK -------------------------------------------------------------
-# If the external-fd patch exists in the repo, apply it here.
-PATCH="$GITHUB_WORKSPACE/native/patches/glorytun-android-fd.patch"
-if [ -f "$PATCH" ]; then
-  echo "Applying Android fd patch..."
-  git apply "$PATCH"
-else
-  echo "WARNING: no Android fd patch found - binary will compile but not function unrooted."
-fi
-# ---------------------------------------------------------------------------
+[ -n "${ANDROID_NDK_HOME:-}" ] || { echo "ANDROID_NDK_HOME not set"; exit 1; }
 
-cat > android-cross.txt <<EOF
-[binaries]
-c = '$CC'
-ar = '$AR'
-strip = '$STRIP'
+TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
+export CC="$TOOLCHAIN/bin/${ABI}${API}-clang"
+export CFLAGS="-Os -fPIE"
+export LDFLAGS="-static-pie"
 
-[host_machine]
-system = 'android'
-cpu_family = 'aarch64'
-cpu = 'aarch64'
-endian = 'little'
-EOF
+echo "==> Cloning glorytun $GLORYTUN_TAG"
+git clone --depth 1 --branch "$GLORYTUN_TAG" --recurse-submodules \
+    "$GLORYTUN_REPO" "$WORK/glorytun"
+cd "$WORK/glorytun"
 
-meson setup build --cross-file android-cross.txt --buildtype release
-ninja -C build
+echo "==> Applying Android patches"
+for p in "$ROOT"/native/patches/glorytun-android-fd.patch \
+         "$ROOT"/native/patches/glorytun-mud-fd-helper.patch; do
+    if [ -f "$p" ]; then
+        echo "    applying $(basename "$p")"
+        git apply --3way --whitespace=fix "$p" || {
+            echo "!! Patch failed to apply cleanly: $p"
+            echo "!! Rebase the hunks against $GLORYTUN_TAG and retry."
+            exit 1
+        }
+    fi
+done
 
-OUT="$GITHUB_WORKSPACE/android/app/src/main/jniLibs/$ABI"
-mkdir -p "$OUT"
-cp build/glorytun "$OUT/libglorytun.so"
-"$STRIP" "$OUT/libglorytun.so" || true
-echo "glorytun -> $OUT/libglorytun.so"
-ls -la "$OUT"
+echo "==> Building"
+make -j"$(nproc)" CC="$CC" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"
+
+echo "==> Verifying static arm64 binary"
+file glorytun | grep -q "aarch64" || { echo "!! not aarch64"; exit 1; }
+
+echo "==> Installing to $OUT_DIR/libglorytun.so"
+mkdir -p "$ROOT/$OUT_DIR"
+cp glorytun "$ROOT/$OUT_DIR/libglorytun.so"
+chmod 755 "$ROOT/$OUT_DIR/libglorytun.so"
+
+echo "==> Done."
