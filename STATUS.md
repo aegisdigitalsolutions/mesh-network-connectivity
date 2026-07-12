@@ -50,12 +50,26 @@ Ground truth constants:
 
 ### GATE 1 — True simultaneous dual-radio bonding  ← THE CORE UNSOLVED PROBLEM
 Right now the tunnel rides essentially ONE path, not two aggregated with seamless
-failover. Two sub-problems:
-- **The glorytun tun-fd patch is MISSING.** Upstream glorytun opens its own tun
-  device; unrooted Android forbids that. It must be patched to accept the fd from
-  `VpnService.establish()`. This is the linchpin — see `native/patches/README.md`.
-- **Per-path radio binding** — each glorytun UDP socket must be bound to a specific
-  `Network` (Wi-Fi vs cellular) via `Network.bindSocket()` so both radios stay live.
+failover. IMPORTANT: there are TWO separate glorytun patches; do not confuse them.
+
+- **Patch A — `GT_TUN_FD` external-fd path in `tun.c`: DONE and WIRED.** ✅
+  Makes glorytun adopt the fd from `VpnService.establish()` instead of opening
+  `/dev/net/tun` (forbidden on unrooted Android), plus a `GT_RUNDIR` writable
+  control-dir shim. Applied by `native/scripts/patch-glorytun.py`, which
+  `build-glorytun-android.sh` runs (line ~54). This is what makes the tunnel
+  connect at all — it is NOT missing.
+
+- **Patch B — mud socket-per-path + SCM_RIGHTS fd-helper: DRAFTED but NOT WIRED.** ⚠️
+  The file `native/patches/glorytun-mud-fd-helper.patch` exists (full mud.c/mud.h/
+  gt.c socket-per-path draft), but NO build script applies it, and per its own
+  README it will not `git apply` cleanly — it must be re-anchored to the real
+  glorytun v0.3.4 mud source before it compiles. This is the actual Gate 1 work:
+  finish + wire Patch B, then bind each per-path UDP socket to a specific `Network`
+  (Wi-Fi vs cellular) via `Network.bindSocket()` so both radios stay live.
+
+  → Fable's starting artifact is `native/patches/glorytun-mud-fd-helper.patch`.
+    Job = finish it against real mud source and wire it into the build, NOT write
+    it from scratch.
 
 ### GATE 2 — Reshare the bond to other devices (Stage 3)
 Not built. Needs an on-device proxy (NetShare/Speedify-style SOCKS/HTTP) or SoftAP
@@ -80,7 +94,8 @@ are open inbound on the DigitalOcean Cloud Firewall, and outbound is left wide o
 
 ## The one thing to build next (priority order)
 
-1. **Gate 1**: glorytun external-fd patch + per-path `bindSocket` → real bonding + failover.
+1. **Gate 1**: finish + wire Patch B (mud socket-per-path) + per-path `bindSocket`
+   → real bonding + failover. (Patch A / tun-fd is already done — don't redo it.)
 2. **Gate 2**: proxy-based reshare to peer devices.
 3. Verify Wi-Fi Calling flows through the tunnel (the real dropped-call fix).
 
@@ -96,8 +111,9 @@ client device; a client with no SIM stays online purely through the bond.
 |---|---|
 | Native VPN service (bonding) | `native/android/BondVpnService.kt` |
 | Capacitor bridge | `native/android/MeshBondingPlugin.kt` |
-| The MISSING glorytun patch | `native/patches/` (spec in its README) |
-| glorytun cross-compile | `native/scripts/build-glorytun-android.sh` |
+| Patch A (tun-fd) — DONE, applied at build | `native/scripts/patch-glorytun.py` |
+| Patch B (mud socket-per-path) — DRAFTED, unwired | `native/patches/glorytun-mud-fd-helper.patch` (+ README) |
+| glorytun cross-compile (applies Patch A) | `native/scripts/build-glorytun-android.sh` |
 | Accelerator tuning | `native/scripts/accelerator-tune.sh` |
 | MeshDrop relay + installer | `native/scripts/meshdrop-relay.js`, `install-meshdrop-relay.sh` |
 | Web ↔ engine seam | `lib/mesh-client.ts`, `lib/native-adapter.ts` |
