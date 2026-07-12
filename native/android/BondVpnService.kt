@@ -72,6 +72,10 @@ class BondVpnService : VpnService() {
 
         thread(name = "meshlink-connect") {
             try {
+                // Guarantee a clean slate. If a previous attempt left a glorytun
+                // process alive or the fd-helper socket bound, this connect would
+                // collide with "address already in use". Kill/close them first.
+                killLeftoverProcess()
                 acquireNetworks()
                 startFdHelper()
                 establishAndLaunch(host, port, key, accelerator)
@@ -385,18 +389,39 @@ class BondVpnService : VpnService() {
 
     // ------------------------------------------------------------ teardown
 
-    private fun teardown() {
-        running = false
-        state = "disconnected"
-        try { glorytun?.destroy() } catch (_: Exception) {}
+    /**
+     * Synchronously kill any leftover glorytun process and release the fd-helper
+     * socket. This is the fix for the "address already in use" loop: glorytun is
+     * launched with "retry count -1", so a polite destroy() (SIGTERM) can be
+     * ignored and the process lingers holding its UDP socket. Starting a new
+     * glorytun before the old one dies collides. So we SIGTERM, wait, then
+     * SIGKILL and confirm it's gone. Also closes the named LocalServerSocket so
+     * its accept() thread unblocks and frees the "meshlink-fd-helper" name.
+     * Safe to call before every connect AND on teardown (idempotent).
+     */
+    private fun killLeftoverProcess() {
+        glorytun?.let { proc ->
+            try {
+                proc.destroy()
+                if (!proc.waitFor(1500, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    proc.destroyForcibly()
+                    proc.waitFor(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
+                }
+            } catch (_: Exception) {
+                try { proc.destroyForcibly() } catch (_: Exception) {}
+            }
+        }
         glorytun = null
-        // Close the fd-helper socket so its accept() thread unblocks and releases
-        // the "meshlink-fd-helper" name — otherwise the NEXT connect attempt dies
-        // with "Address already in use".
         try { fdHelperServer?.close() } catch (_: Exception) {}
         fdHelperServer = null
         try { fdHelperThread?.interrupt() } catch (_: Exception) {}
         fdHelperThread = null
+    }
+
+    private fun teardown() {
+        running = false
+        state = "disconnected"
+        killLeftoverProcess()
         try { tunPfd?.close() } catch (_: Exception) {}   // no-op if detached
         tunPfd = null
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
