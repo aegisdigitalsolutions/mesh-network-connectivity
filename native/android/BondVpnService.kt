@@ -46,6 +46,7 @@ class BondVpnService : VpnService() {
     private var tunPfd: ParcelFileDescriptor? = null
     private var glorytun: Process? = null
     private var fdHelperThread: Thread? = null
+    private var fdHelperServer: android.net.LocalServerSocket? = null
     private var telemetryThread: Thread? = null
     @Volatile private var running = false
 
@@ -180,7 +181,12 @@ class BondVpnService : VpnService() {
 
     /** Receives glorytun's UDP socket fds via SCM_RIGHTS; protects and binds them. */
     private fun startFdHelper() {
+        // If a prior attempt left this named socket bound (abstract namespace),
+        // creating it again throws "Address already in use". Close any stale one
+        // first so retries never collide.
+        try { fdHelperServer?.close() } catch (_: Exception) {}
         val server = android.net.LocalServerSocket(FD_HELPER_NAME)
+        fdHelperServer = server
         fdHelperThread = thread(name = "meshlink-fd-helper") {
             try {
                 while (running || glorytun == null) {
@@ -384,6 +390,13 @@ class BondVpnService : VpnService() {
         state = "disconnected"
         try { glorytun?.destroy() } catch (_: Exception) {}
         glorytun = null
+        // Close the fd-helper socket so its accept() thread unblocks and releases
+        // the "meshlink-fd-helper" name — otherwise the NEXT connect attempt dies
+        // with "Address already in use".
+        try { fdHelperServer?.close() } catch (_: Exception) {}
+        fdHelperServer = null
+        try { fdHelperThread?.interrupt() } catch (_: Exception) {}
+        fdHelperThread = null
         try { tunPfd?.close() } catch (_: Exception) {}   // no-op if detached
         tunPfd = null
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
