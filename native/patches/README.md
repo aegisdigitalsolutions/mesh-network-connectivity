@@ -1,26 +1,35 @@
 # glorytun Android patches
 
-## `glorytun-android-fd.patch` (TO BE CREATED)
+## Current approach: `../scripts/patch-glorytun.py` (ACTIVE)
 
-This is the single most important piece of unfinished engineering.
+The hand-written unified-diff patches that used to live here could not apply:
+they were written against an imagined source layout that does not match real
+glorytun **v0.3.4** (commit `c113724`). In actual v0.3.4:
 
-**Problem:** Upstream glorytun calls `tun_create()` to open its own `/dev/net/tun`
-device by name. On unrooted Android this is not permitted — only `VpnService` may
-create a tun, and it hands back an already-open **file descriptor**, not a device
-name.
+- `tun_create(char *name, size_t len, const char *dev_name)` takes three args,
+  and there is **no** `tun_set_mtu()` in `src/tun.c`.
+- control sockets are located via `ctl_rundir()` + `ctl_create(const char *file)`,
+  not the `ctl_create(dir, file)` the old patch assumed.
 
-**Required change:** Add a `fd <n>` argument (or `GLORYTUN_TUN_FD` env var) to the
-`bind` command that makes glorytun **use the passed descriptor directly** instead
-of creating its own. Concretely, in the tun-setup path (`src/tun.c` /
-`src/bind.c`), when an external fd is provided:
+So instead of brittle line-numbered diffs, the build now runs
+**`native/scripts/patch-glorytun.py`**, a string-anchored patcher matched to the
+real v0.3.4 source. It inserts exactly two shims:
 
-- skip `open("/dev/net/tun")` and the `TUNSETIFF` ioctl,
-- `dup()` the provided fd and use it as the tunnel fd,
-- set it non-blocking (`O_NONBLOCK`) to match glorytun's event loop.
+1. **`src/tun.c` → `tun_create()`** — if `GT_TUN_FD` is set, adopt that fd (the one
+   handed over by Android `VpnService.establish()`) instead of opening
+   `/dev/net/tun` (which EPERMs on unrooted Android).
+2. **`src/ctl.c` → `ctl_rundir()`** — if `GT_RUNDIR` is set, use it, because
+   Android's `/run` is not writable and glorytun needs a writable control dir.
 
-`BondVpnService.kt` already passes `fd <tunFd>` on the command line, so once this
-patch exists and is committed here, `build-glorytun-android.sh` applies it
-automatically and the bundled binary becomes functional.
+This is **Gate 1**: a single-link tunnel to the droplet. Loop-prevention is handled
+on the Android side by `addDisallowedApplication(packageName)` in
+`BondVpnService.kt`, so it works with **vanilla mud** — no mud patch required.
 
-Until this patch exists, the compiled binary runs but cannot attach to the tunnel
-on an unrooted device.
+## `glorytun-mud-fd-helper.patch` (Gate 2, NOT yet wired into the build)
+
+Kept for reference only. This is the socket-per-path + SCM_RIGHTS fd-helper work
+needed for true dual-radio bonding (Gate 2). It is **not** applied by the current
+build script. Before enabling it, it must be re-expressed against the real
+`mud/mud.c` from the pinned submodule (its `mud_addr_to_sockaddr` /
+`mud_addr_to_str` anchors need to be matched to the actual helper names), and the
+`protect()`/`bindSocket()` path in `BondVpnService.startFdHelper()` becomes active.

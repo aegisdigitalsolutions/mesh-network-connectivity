@@ -166,7 +166,7 @@ class BondVpnService : VpnService() {
     // ------------------------------------------------------------ tunnel
 
     private fun establishAndLaunch(host: String, port: Int, key: String) {
-        val pfd = Builder()
+        val builder = Builder()
             .setSession("MeshLink")
             .addAddress("10.99.0.2", 24)
             .addRoute("0.0.0.0", 0)
@@ -174,7 +174,19 @@ class BondVpnService : VpnService() {
             .addDnsServer("9.9.9.9")
             .setMtu(1400)
             .allowBypass()
-            .establish() ?: throw IllegalStateException("establish() null — consent missing?")
+
+        // Gate 1 loop-prevention: the glorytun subprocess runs under our own UID.
+        // Excluding our package keeps its UDP tunnel packets OUT of the tun we just
+        // created (otherwise they'd recurse). This is what makes bonding work with
+        // vanilla mud; the Gate 2 fd-helper/protect() path supersedes this later.
+        try {
+            builder.addDisallowedApplication(packageName)
+        } catch (e: Exception) {
+            Log.w(TAG, "addDisallowedApplication failed: ${e.message}")
+        }
+
+        val pfd = builder.establish()
+            ?: throw IllegalStateException("establish() null — consent missing?")
         tunPfd = pfd
 
         val keyFile = File(filesDir, "gt.key").apply {

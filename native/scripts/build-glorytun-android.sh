@@ -1,49 +1,70 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Builds static arm64 glorytun with Android patches; installs to jniLibs
-# (the only location Android grants exec permission on targetSdk >= 29).
-# Requires: ANDROID_NDK_HOME, git, make. Run from repo root after `cap add android`.
+# Builds a static-PIE arm64 glorytun with MeshLink's Android shims and installs
+# it to jniLibs (the only dir Android grants exec permission on targetSdk >= 29).
+#
+# v0.3.4 links -lsodium and pulls sources from argz/ + mud/ + mud/aegis256/ + src/.
+# Its Makefile's cross mechanism targets musl-cross toolchains, not the NDK, so we
+# bypass it and drive NDK clang directly. Requires: ANDROID_NDK_HOME, git, curl, make.
+# Run from the repo root AFTER `npx cap add android`.
 
 GLORYTUN_REPO="https://github.com/angt/glorytun.git"
-GLORYTUN_TAG="v0.3.4"                       # PINNED — patches target this tag
+GLORYTUN_TAG="v0.3.4"                 # PINNED — the patcher targets this tree
+LIBSODIUM_TARBALL="https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-stable.tar.gz"
 API=29
-ABI=aarch64-linux-android
 OUT_DIR="android/app/src/main/jniLibs/arm64-v8a"
 WORK="$(mktemp -d)"
 ROOT="$(pwd)"
 
 trap 'rm -rf "$WORK"' EXIT
 
-[ -n "${ANDROID_NDK_HOME:-}" ] || { echo "ANDROID_NDK_HOME not set"; exit 1; }
+[ -n "${ANDROID_NDK_HOME:-}" ] || { echo "!! ANDROID_NDK_HOME not set"; exit 1; }
 
 TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
-export CC="$TOOLCHAIN/bin/${ABI}${API}-clang"
-export CFLAGS="-Os -fPIE"
-export LDFLAGS="-static-pie"
+CC="$TOOLCHAIN/bin/aarch64-linux-android${API}-clang"
+[ -x "$CC" ] || { echo "!! NDK clang not found at $CC"; exit 1; }
 
-echo "==> Cloning glorytun $GLORYTUN_TAG"
+# ---------------------------------------------------------------- libsodium
+echo "==> Building libsodium (arm64, static) via official NDK script"
+cd "$WORK"
+curl -fsSL "$LIBSODIUM_TARBALL" -o libsodium.tar.gz
+tar xzf libsodium.tar.gz
+cd libsodium-stable
+# android-aarch64.sh reads ANDROID_NDK_HOME and emits a static libsodium.a.
+ANDROID_NDK_HOME="$ANDROID_NDK_HOME" ./dist-build/android-aarch64.sh
+
+SODIUM_A="$(find "$WORK/libsodium-stable" -name libsodium.a | head -1)"
+[ -n "$SODIUM_A" ] || { echo "!! libsodium.a not produced"; exit 1; }
+SODIUM_INC="$(dirname "$(dirname "$SODIUM_A")")/include"
+echo "   libsodium.a -> $SODIUM_A"
+echo "   headers     -> $SODIUM_INC"
+
+# ---------------------------------------------------------------- glorytun
+echo "==> Cloning glorytun $GLORYTUN_TAG (+ submodules)"
+cd "$WORK"
 git clone --depth 1 --branch "$GLORYTUN_TAG" --recurse-submodules \
-    "$GLORYTUN_REPO" "$WORK/glorytun"
-cd "$WORK/glorytun"
+    "$GLORYTUN_REPO" glorytun
+cd glorytun
 
-echo "==> Applying Android patches"
-for p in "$ROOT"/native/patches/glorytun-android-fd.patch \
-         "$ROOT"/native/patches/glorytun-mud-fd-helper.patch; do
-    if [ -f "$p" ]; then
-        echo "    applying $(basename "$p")"
-        git apply --3way --whitespace=fix "$p" || {
-            echo "!! Patch failed to apply cleanly: $p"
-            echo "!! Rebase the hunks against $GLORYTUN_TAG and retry."
-            exit 1
-        }
-    fi
-done
+echo "==> Applying MeshLink Android shims"
+python3 "$ROOT/native/scripts/patch-glorytun.py"
 
-echo "==> Building"
-make -j"$(nproc)" CC="$CC" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"
+echo "==> Compiling glorytun with NDK clang (static-PIE, armv8-a+crypto)"
+# aegis256 uses ARM crypto extensions; the S26 Ultra has them. static-PIE is
+# required because Android's linker rejects non-PIE main executables on API 29+.
+"$CC" \
+    -std=c11 -O2 -fPIC -fPIE -static-pie \
+    -march=armv8-a+crypto \
+    -fstack-protector-strong \
+    -DPACKAGE_NAME='"glorytun"' \
+    -DPACKAGE_VERSION='"v0.3.4-meshlink"' \
+    -I. -Iargz -Imud -Imud/aegis256 -Isrc -I"$SODIUM_INC" \
+    argz/argz.c mud/mud.c mud/aegis256/aegis256.c src/*.c \
+    "$SODIUM_A" \
+    -o glorytun
 
-echo "==> Verifying static arm64 binary"
+echo "==> Verifying binary"
 file glorytun | grep -q "aarch64" || { echo "!! not aarch64"; exit 1; }
 
 echo "==> Installing to $OUT_DIR/libglorytun.so"
