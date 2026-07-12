@@ -13,8 +13,9 @@ export interface BondConfig {
 }
 
 export const DEFAULT_CONFIG: BondConfig = {
-  host: '',
-  port: 65001,
+  // Your live DigitalOcean bonding droplet
+  host: '159.203.67.127',
+  port: 5000,
   key: '',
   autoConnect: false,
 }
