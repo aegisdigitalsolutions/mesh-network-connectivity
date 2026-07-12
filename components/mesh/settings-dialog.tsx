@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { X, Server, KeyRound, Plug, Gauge } from 'lucide-react'
+import { X, Server, KeyRound, Plug, Gauge, Share2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   type BondConfig,
@@ -126,6 +126,19 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
             on={config.accelerator}
             onToggle={() => update('accelerator', !config.accelerator)}
           />
+
+          <Field label="MeshDrop relay port" hint="Port of meshdrop-relay.js on the VPS. Leave 0 for demo mode.">
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-input px-3">
+              <Share2 className="size-4 shrink-0 text-muted-foreground" />
+              <input
+                value={config.relayPort || ''}
+                onChange={(e) => update('relayPort', Number(e.target.value.replace(/\D/g, '')) || 0)}
+                inputMode="numeric"
+                placeholder="8088"
+                className="h-11 w-full bg-transparent font-mono text-sm outline-none placeholder:text-muted-foreground/60"
+              />
+            </div>
+          </Field>
         </div>
 
         <button
