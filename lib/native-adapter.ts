@@ -13,11 +13,12 @@
 // simulation mode. It only activates inside the installed Android APK.
 
 import {
-  INITIAL_UPLINKS,
-  INITIAL_DEVICES,
   buildSnapshot,
   type Uplink,
   type LinkStatus,
+  type MeshDevice,
+  type DeviceKind,
+  type Transport,
   type MeshSnapshot,
 } from './mesh-data'
 import type { ConnectionState } from './mesh-client'
@@ -35,9 +36,20 @@ interface NativeUplink {
   enabled: boolean
   telemetry: NativeUplinkTelemetry
 }
+interface NativeDevice {
+  id: string
+  name: string
+  model?: string
+  kind?: string
+  transport?: string
+  online: boolean
+  usage?: number
+  ip: string
+}
 interface NativeSnapshot {
   state: ConnectionState
   uplinks: NativeUplink[]
+  devices?: NativeDevice[]
   serverHost: string
   timestamp: number
 }
@@ -90,17 +102,11 @@ function resolvePlugin(cap: CapacitorRuntime): NativePlugin | undefined {
   return undefined
 }
 
-// Which native radio feeds each UI uplink slot. On the host phone the Wi-Fi
-// link is the connection out to the M7 (T-Mobile) hotspot; the phone's own SIM
-// is the cellular path (mapped to the AT&T slot). Tune on-device if needed.
-const SLOT_TO_RADIO: Record<string, string> = { tmobile: 'wifi', att: 'cell' }
-
-let currentUplinks: Uplink[] = INITIAL_UPLINKS.map((u) => downed(u))
+// Everything below is built purely from what the native plugin reports. No
+// preset gear: uplinks and devices appear only as the bond actually sees them.
+let currentUplinks: Uplink[] = []
+let currentDevices: MeshDevice[] = []
 let currentState: ConnectionState = 'disconnected'
-
-function downed(u: Uplink): Uplink {
-  return { ...u, status: 'down', signal: 0, down: 0, up: 0, latencyMs: 0 }
-}
 
 function mapStatus(status: string, enabled: boolean): LinkStatus {
   if (!enabled || status === 'disabled' || status === 'down') return 'down'
@@ -108,32 +114,55 @@ function mapStatus(status: string, enabled: boolean): LinkStatus {
   return 'degraded'
 }
 
-function applyNative(ns: NativeSnapshot): void {
-  const byRadio: Record<string, NativeUplink> = {}
-  for (const u of ns.uplinks ?? []) byRadio[u.id] = u
+const DEVICE_KINDS: DeviceKind[] = ['android', 'ipad', 'iphone']
+const TRANSPORTS: Transport[] = ['wifi', 'bluetooth', 'host']
 
-  currentUplinks = INITIAL_UPLINKS.map((base) => {
-    const n = byRadio[SLOT_TO_RADIO[base.id]]
-    if (!n) return downed(base)
-    const status = mapStatus(n.status, n.enabled)
-    if (status === 'down') return { ...downed(base), enabled: n.enabled }
-    return {
-      ...base,
-      enabled: n.enabled,
-      status,
-      // native reports a single throughput figure; surface it as down, and a
-      // rough up estimate until per-direction stats are wired in glorytun show.
-      down: Math.round(n.telemetry.throughputMbps),
-      up: Math.round(n.telemetry.throughputMbps * 0.15),
-      latencyMs: Math.round(n.telemetry.latencyMs),
-      signal: status === 'degraded' ? 40 : 75,
-    }
-  })
+function mapUplink(n: NativeUplink): Uplink {
+  const status = mapStatus(n.status, n.enabled)
+  const live = status !== 'down'
+  return {
+    id: n.id,
+    carrier: n.name,
+    hardware: n.type ?? '',
+    status,
+    enabled: n.enabled,
+    // native reports a single throughput figure; surface it as down, and a
+    // rough up estimate until per-direction stats are wired in glorytun show.
+    down: live ? Math.round(n.telemetry.throughputMbps) : 0,
+    up: live ? Math.round(n.telemetry.throughputMbps * 0.15) : 0,
+    latencyMs: live ? Math.round(n.telemetry.latencyMs) : 0,
+    signal: status === 'healthy' ? 75 : status === 'degraded' ? 40 : 0,
+    band: '',
+  }
+}
+
+function mapDevice(d: NativeDevice): MeshDevice {
+  const kind = (DEVICE_KINDS as string[]).includes(d.kind ?? '')
+    ? (d.kind as DeviceKind)
+    : 'android'
+  const transport = (TRANSPORTS as string[]).includes(d.transport ?? '')
+    ? (d.transport as Transport)
+    : 'wifi'
+  return {
+    id: d.id,
+    name: d.name,
+    model: d.model ?? '',
+    kind,
+    transport,
+    online: d.online,
+    usage: Math.round(d.usage ?? 0),
+    ip: d.ip,
+  }
+}
+
+function applyNative(ns: NativeSnapshot): void {
+  currentUplinks = (ns.uplinks ?? []).map(mapUplink)
+  currentDevices = (ns.devices ?? []).map(mapDevice)
   currentState = ns.state
 }
 
 function snapshot(): MeshSnapshot {
-  return buildSnapshot(currentUplinks, INITIAL_DEVICES)
+  return buildSnapshot(currentUplinks, currentDevices)
 }
 
 let installed = false

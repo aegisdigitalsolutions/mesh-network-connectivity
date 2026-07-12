@@ -42,49 +42,9 @@ export interface MeshSnapshot {
   failoverArmed: boolean
 }
 
-// ---- Static registry of your actual gear (2 independent networks) ----
-
-export const INITIAL_UPLINKS: Uplink[] = [
-  {
-    id: 'tmobile',
-    carrier: 'T-Mobile',
-    hardware: 'Netgear Nighthawk M7 Pro',
-    status: 'healthy',
-    enabled: true,
-    signal: 82,
-    down: 214,
-    up: 41,
-    latencyMs: 38,
-    band: '5G n41',
-  },
-  {
-    id: 'att',
-    carrier: 'AT&T',
-    hardware: 'AT&T Prepaid 5G Hotspot',
-    status: 'healthy',
-    enabled: true,
-    signal: 71,
-    down: 168,
-    up: 28,
-    latencyMs: 44,
-    band: '5G n77',
-  },
-]
-
-export const INITIAL_DEVICES: MeshDevice[] = [
-  { id: 'd1', name: 'Host — S26 Ultra', model: 'Galaxy S26 Ultra', kind: 'android', transport: 'host', online: true, usage: 46, ip: '10.8.0.1' },
-  { id: 'd2', name: 'S26 Ultra', model: 'Galaxy S26 Ultra', kind: 'android', transport: 'wifi', online: true, usage: 22, ip: '10.8.0.2' },
-  { id: 'd3', name: 'S22+', model: 'Galaxy S22+', kind: 'android', transport: 'wifi', online: true, usage: 8, ip: '10.8.0.3' },
-  { id: 'd4', name: 'A17 (Cricket)', model: 'Galaxy A17', kind: 'android', transport: 'wifi', online: true, usage: 5, ip: '10.8.0.4' },
-  { id: 'd5', name: 'A17 (US Mobile)', model: 'Galaxy A17', kind: 'android', transport: 'bluetooth', online: true, usage: 2, ip: '10.8.0.5' },
-  { id: 'd6', name: 'Prepaid Android 1', model: 'Android', kind: 'android', transport: 'wifi', online: true, usage: 4, ip: '10.8.0.6' },
-  { id: 'd7', name: 'Prepaid Android 2', model: 'Android', kind: 'android', transport: 'bluetooth', online: false, usage: 0, ip: '10.8.0.7' },
-  { id: 'd8', name: 'Prepaid Android 3', model: 'Android', kind: 'android', transport: 'wifi', online: true, usage: 3, ip: '10.8.0.8' },
-  { id: 'd9', name: 'iPad Pro', model: 'iPad Pro', kind: 'ipad', transport: 'wifi', online: true, usage: 31, ip: '10.8.0.9' },
-  { id: 'd10', name: 'iPad Air', model: 'iPad Air', kind: 'ipad', transport: 'wifi', online: true, usage: 12, ip: '10.8.0.10' },
-  { id: 'd11', name: 'iPhone 15', model: 'iPhone 15', kind: 'iphone', transport: 'wifi', online: true, usage: 18, ip: '10.8.0.11' },
-  { id: 'd12', name: 'iPhone 14', model: 'iPhone 14', kind: 'iphone', transport: 'bluetooth', online: true, usage: 6, ip: '10.8.0.12' },
-]
+// No preset gear. Uplinks and devices populate from live telemetry only —
+// the native bonding plugin (on-device) or a real VPS feed. Until something
+// actually reports in, both lists are empty and the UI shows a waiting state.
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n))

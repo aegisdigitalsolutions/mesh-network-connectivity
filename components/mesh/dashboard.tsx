@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Activity, RadioTower, Settings, Power, Loader2 } from 'lucide-react'
-import { buildSnapshot, INITIAL_UPLINKS, INITIAL_DEVICES, type MeshSnapshot } from '@/lib/mesh-data'
+import { buildSnapshot, type MeshSnapshot } from '@/lib/mesh-data'
 import { getMeshClient, type ConnectionState } from '@/lib/mesh-client'
 import { loadConfig, isConfigured, type BondConfig } from '@/lib/mesh-config'
 import { BondSummary } from './bond-summary'
@@ -12,10 +12,8 @@ import { SettingsDialog } from './settings-dialog'
 import { cn } from '@/lib/utils'
 
 const HISTORY_LEN = 40
-const EMPTY_SNAPSHOT = buildSnapshot(
-  INITIAL_UPLINKS.map((u) => ({ ...u, status: 'down' as const, signal: 0, down: 0, up: 0, latencyMs: 0 })),
-  INITIAL_DEVICES,
-)
+// Starts empty; uplinks and devices fill in from live telemetry as they report.
+const EMPTY_SNAPSHOT = buildSnapshot([], [])
 
 export function Dashboard() {
   const [snapshot, setSnapshot] = useState<MeshSnapshot>(EMPTY_SNAPSHOT)
@@ -112,13 +110,27 @@ export function Dashboard() {
 
       <div className="flex items-center justify-between px-1">
         <h2 className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Uplinks</h2>
-        <span className="font-mono text-[11px] text-muted-foreground">2 independent networks</span>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {snapshot.uplinks.length === 0
+            ? 'awaiting links'
+            : `${snapshot.uplinks.length} independent network${snapshot.uplinks.length === 1 ? '' : 's'}`}
+        </span>
       </div>
-      <div className={cn('flex flex-col gap-3 transition-opacity', !connected && 'opacity-60')}>
-        {snapshot.uplinks.map((uplink) => (
-          <UplinkCard key={uplink.id} uplink={uplink} onToggle={toggleUplink} />
-        ))}
-      </div>
+      {snapshot.uplinks.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-border bg-card/50 px-4 py-8 text-center">
+          <RadioTower className="size-5 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">No uplinks detected yet</p>
+          <p className="font-mono text-[10px] text-muted-foreground">
+            Links appear here once the bond reports them
+          </p>
+        </div>
+      ) : (
+        <div className={cn('flex flex-col gap-3 transition-opacity', !connected && 'opacity-60')}>
+          {snapshot.uplinks.map((uplink) => (
+            <UplinkCard key={uplink.id} uplink={uplink} onToggle={toggleUplink} />
+          ))}
+        </div>
+      )}
 
       <DeviceList devices={snapshot.devices} />
 

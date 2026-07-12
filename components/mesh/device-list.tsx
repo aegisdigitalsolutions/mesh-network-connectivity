@@ -26,11 +26,17 @@ export function DeviceList({ devices }: DeviceListProps) {
         </span>
       </header>
 
-      <ul className="mt-3 divide-y divide-border/60">
-        {devices.map((device) => (
-          <DeviceRow key={device.id} device={device} />
-        ))}
-      </ul>
+      {devices.length === 0 ? (
+        <p className="mt-4 py-4 text-center font-mono text-[11px] text-muted-foreground">
+          No devices on the mesh yet
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-border/60">
+          {devices.map((device) => (
+            <DeviceRow key={device.id} device={device} />
+          ))}
+        </ul>
+      )}
     </section>
   )
 }

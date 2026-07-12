@@ -8,8 +8,6 @@
 // The UI only depends on this interface, so going live is a drop-in swap.
 
 import {
-  INITIAL_UPLINKS,
-  INITIAL_DEVICES,
   tickUplinks,
   buildSnapshot,
   type Uplink,
@@ -34,7 +32,8 @@ export interface MeshClient {
 
 class SimulatedMeshClient implements MeshClient {
   readonly mode = 'simulated' as const
-  private uplinks: Uplink[] = INITIAL_UPLINKS.map((u) => ({ ...u }))
+  // No preset gear — nothing to simulate until a real source reports in.
+  private uplinks: Uplink[] = []
   private state: ConnectionState = 'disconnected'
 
   async connect(): Promise<void> {
@@ -69,7 +68,7 @@ class SimulatedMeshClient implements MeshClient {
         latencyMs: 0,
       }))
     }
-    return buildSnapshot(this.uplinks, INITIAL_DEVICES)
+    return buildSnapshot(this.uplinks, [])
   }
 }
 
