@@ -63,6 +63,41 @@ jobs:
           cp native/android/MainActivity.java \
             android/app/src/main/java/com/meshlink/app/MainActivity.java
 
+      # Capacitor's generated app module is Java-only. Our engine is Kotlin, so
+      # without the kotlin-android plugin the .kt files are never compiled and
+      # MainActivity (Java) can't import the com.meshlink.app.bond package.
+      - name: Enable Kotlin in Android project
+        run: |
+          set -euo pipefail
+          KOTLIN_VERSION=1.8.22
+
+          # 1) Root build.gradle: add the Kotlin Gradle plugin to the classpath,
+          #    right after the Android Gradle plugin classpath line.
+          python3 - <<PYEOF
+          import re, io
+          p = "android/build.gradle"
+          s = open(p).read()
+          cp = "classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:${KOTLIN_VERSION}'"
+          if "kotlin-gradle-plugin" not in s:
+              s = re.sub(r"(classpath ['\"]com\.android\.tools\.build:gradle:[^'\"]+['\"])",
+                         r"\1\n        " + cp, s, count=1)
+          open(p, "w").write(s)
+          print("patched", p)
+          PYEOF
+
+          # 2) App build.gradle: apply the kotlin-android plugin and add stdlib.
+          if ! grep -q "kotlin-android" android/app/build.gradle; then
+            sed -i "0,/apply plugin: 'com.android.application'/s//apply plugin: 'com.android.application'\napply plugin: 'kotlin-android'/" \
+              android/app/build.gradle
+          fi
+          cat >> android/app/build.gradle <<EOF
+
+          dependencies {
+              implementation "org.jetbrains.kotlin:kotlin-stdlib:${KOTLIN_VERSION}"
+          }
+          EOF
+          echo "Kotlin enabled in Android project"
+
       - name: Merge manifest additions
         run: |
           python3 native/scripts/merge-manifest.py \
