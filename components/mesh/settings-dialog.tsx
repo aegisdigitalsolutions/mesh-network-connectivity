@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { X, Server, KeyRound, Plug } from 'lucide-react'
+import { X, Server, KeyRound, Plug, Gauge, Share2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   type BondConfig,
@@ -92,7 +92,7 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
               value={config.port}
               onChange={(e) => update('port', Number(e.target.value.replace(/\D/g, '')) || 0)}
               inputMode="numeric"
-              placeholder="65001"
+              placeholder="5000"
               className="h-11 w-full rounded-xl border border-border bg-input px-3 font-mono text-sm outline-none placeholder:text-muted-foreground/60"
             />
           </Field>
@@ -113,26 +113,32 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
             </div>
           </Field>
 
-          <button
-            type="button"
-            onClick={() => update('autoConnect', !config.autoConnect)}
-            className="flex items-center justify-between rounded-xl border border-border bg-input px-3 py-2.5"
-          >
-            <span className="text-sm">Auto-connect on launch</span>
-            <span
-              className={cn(
-                'relative h-6 w-11 shrink-0 rounded-full border transition-colors',
-                config.autoConnect ? 'border-primary/50 bg-primary/80' : 'border-border bg-muted',
-              )}
-            >
-              <span
-                className={cn(
-                  'absolute top-0.5 size-4 rounded-full bg-background transition-transform',
-                  config.autoConnect ? 'translate-x-5' : 'translate-x-0.5',
-                )}
+          <ToggleRow
+            label="Auto-connect on launch"
+            on={config.autoConnect}
+            onToggle={() => update('autoConnect', !config.autoConnect)}
+          />
+
+          <ToggleRow
+            label="Accelerator"
+            hint="Optimized transport — larger buffers & MTU probing. Pair with accelerator-tune.sh on the droplet."
+            icon={<Gauge className="size-4 shrink-0 text-primary" />}
+            on={config.accelerator}
+            onToggle={() => update('accelerator', !config.accelerator)}
+          />
+
+          <Field label="MeshDrop relay port" hint="Port of meshdrop-relay.js on the VPS. Leave 0 for demo mode.">
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-input px-3">
+              <Share2 className="size-4 shrink-0 text-muted-foreground" />
+              <input
+                value={config.relayPort || ''}
+                onChange={(e) => update('relayPort', Number(e.target.value.replace(/\D/g, '')) || 0)}
+                inputMode="numeric"
+                placeholder="8088"
+                className="h-11 w-full bg-transparent font-mono text-sm outline-none placeholder:text-muted-foreground/60"
               />
-            </span>
-          </button>
+            </div>
+          </Field>
         </div>
 
         <button
@@ -151,6 +157,52 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
         )}
       </div>
     </div>
+  )
+}
+
+function ToggleRow({
+  label,
+  hint,
+  icon,
+  on,
+  onToggle,
+}: {
+  label: string
+  hint?: string
+  icon?: React.ReactNode
+  on: boolean
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={on}
+      className="flex items-center justify-between gap-3 rounded-xl border border-border bg-input px-3 py-2.5 text-left"
+    >
+      <span className="flex items-start gap-2">
+        {icon}
+        <span className="flex flex-col">
+          <span className="text-sm">{label}</span>
+          {hint && (
+            <span className="font-mono text-[10px] leading-relaxed text-muted-foreground">{hint}</span>
+          )}
+        </span>
+      </span>
+      <span
+        className={cn(
+          'relative h-6 w-11 shrink-0 rounded-full border transition-colors',
+          on ? 'border-primary/50 bg-primary/80' : 'border-border bg-muted',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute top-0.5 size-4 rounded-full bg-background transition-transform',
+            on ? 'translate-x-5' : 'translate-x-0.5',
+          )}
+        />
+      </span>
+    </button>
   )
 }
 

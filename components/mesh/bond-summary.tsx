@@ -10,6 +10,7 @@ interface BondSummaryProps {
 
 export function BondSummary({ snapshot, history }: BondSummaryProps) {
   const { aggregateDown, aggregateUp, activeLinks, failoverArmed } = snapshot
+  const totalLinks = snapshot.uplinks.length
 
   return (
     <section className="rounded-2xl border border-border bg-card p-5">
@@ -45,7 +46,7 @@ export function BondSummary({ snapshot, history }: BondSummaryProps) {
       <div className="mt-4 grid grid-cols-3 gap-2">
         <Stat icon={<ArrowDown className="size-4 text-primary" />} label="Down" value={`${aggregateDown}`} unit="Mbps" />
         <Stat icon={<ArrowUp className="size-4 text-primary" />} label="Up" value={`${aggregateUp}`} unit="Mbps" />
-        <Stat label="Active links" value={`${activeLinks}`} unit="of 2" />
+        <Stat label="Active links" value={`${activeLinks}`} unit={`of ${totalLinks}`} />
       </div>
     </section>
   )

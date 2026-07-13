@@ -1,0 +1,228 @@
+diff --git a/mud.c b/mud.c
+--- a/mud.c
++++ b/mud.c
+@@ -20,6 +20,70 @@
+ #include <sys/socket.h>
+ #include <sys/types.h>
++#include <sys/un.h>
++#include <stdlib.h>
++#include <stddef.h>
++
++/* ================= MeshLink Android additions =================
++ *
++ * 1) mud_android_offer_fd(): after creating ANY tunnel UDP socket, hand its
++ *    fd to the VpnService over an abstract unix socket (GT_FD_HELPER) so the
++ *    service can protect() it (prevents routing loop) and
++ *    Network.bindSocket() it (fwmark -> correct radio). Blocks for 1-byte ack.
++ *    No-op when GT_FD_HELPER is unset (desktop/server builds unaffected).
++ *
++ * 2) Socket-per-path: upstream mud multiplexes all paths over one wildcard
++ *    socket and selects source addr via IP_PKTINFO. Android routes by fwmark,
++ *    not source addr, so each path gets its own socket bound to its local
++ *    addr and offered to the helper. Active only when GT_FD_HELPER is set.
++ * =============================================================== */
++
++static int
++mud_android_enabled(void)
++{
++    const char *e = getenv("GT_FD_HELPER");
++    return e && e[0];
++}
++
++static int
++mud_android_offer_fd(int fd, const char *tag)
++{
++    const char *name = getenv("GT_FD_HELPER");
++    if (!name || !name[0])
++        return 0;
++
++    int cs = socket(AF_UNIX, SOCK_STREAM, 0);
++    if (cs < 0)
++        return -1;
++
++    struct sockaddr_un sun = { .sun_family = AF_UNIX };
++    size_t n = strnlen(name, sizeof(sun.sun_path) - 2);
++    sun.sun_path[0] = 0;                          /* abstract namespace */
++    memcpy(sun.sun_path + 1, name, n);
++
++    if (connect(cs, (struct sockaddr *)&sun,
++                (socklen_t)(offsetof(struct sockaddr_un, sun_path) + 1 + n))) {
++        close(cs);
++        return -1;
++    }
++
++    char buf[128];
++    int blen = snprintf(buf, sizeof(buf), "%s", tag ? tag : "default");
++
++    union { struct cmsghdr hdr; char raw[CMSG_SPACE(sizeof(int))]; } u;
++    struct iovec iov = { .iov_base = buf, .iov_len = (size_t)blen };
++    struct msghdr msg = {
++        .msg_iov = &iov, .msg_iovlen = 1,
++        .msg_control = u.raw, .msg_controllen = sizeof(u.raw),
++    };
++    struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
++    c->cmsg_level = SOL_SOCKET;
++    c->cmsg_type  = SCM_RIGHTS;
++    c->cmsg_len   = CMSG_LEN(sizeof(int));
++    memcpy(CMSG_DATA(c), &fd, sizeof(int));
++
++    if (sendmsg(cs, &msg, 0) < 0) {
++        close(cs);
++        return -1;
++    }
++
++    char ack;
++    ssize_t r = recv(cs, &ack, 1, 0);             /* block until protected/bound */
++    close(cs);
++    return (r == 1) ? 0 : -1;
++}
+ 
+diff --git a/mud.h b/mud.h
+--- a/mud.h
++++ b/mud.h
+@@ (inside struct mud_path, after the addr members)
+ struct mud_path {
+     struct mud_addr local_addr;
+     struct sockaddr_storage addr;
++    int fd;                     /* MeshLink: dedicated socket; -1 = use mud->fd */
+     enum mud_path_state state;
+@@ (rest of struct unchanged)
+ 
+diff --git a/mud.c b/mud.c
+--- a/mud.c
++++ b/mud.c
+@@ (in mud_create, immediately after mud->fd is successfully created/bound)
+     mud->fd = mud_sock_open(af);
+ 
+     if (mud->fd == -1) {
+         mud_delete(mud);
+         return NULL;
+     }
++
++    /* MeshLink: the primary socket carries the "default" path (Gate 1) and
++       all control traffic. Protect it regardless of per-path mode. */
++    if (mud_android_offer_fd(mud->fd, "default")) {
++        mud_delete(mud);
++        return NULL;
++    }
+ 
+@@ (in the path allocation site inside mud_get_path / mud_path_update,
+    right after the new path slot is claimed and local_addr is stored)
+     path->local_addr = *local_addr;
+     path->state = state;
++    path->fd = -1;
++
++    /* MeshLink: dedicated, radio-bound socket per path. */
++    if (mud_android_enabled()) {
++        int pfd = mud_sock_open(mud->addr.ss_family);
++        if (pfd != -1) {
++            struct sockaddr_storage ls = {0};
++            socklen_t lslen = mud_addr_to_sockaddr(&ls, local_addr, 0 /* any port */);
++            if (!bind(pfd, (struct sockaddr *)&ls, lslen)) {
++                char tag[64];
++                mud_addr_to_str(local_addr, tag, sizeof(tag));
++                if (!mud_android_offer_fd(pfd, tag)) {
++                    path->fd = pfd;
++                } else {
++                    close(pfd);       /* helper refused: fall back to mud->fd */
++                }
++            } else {
++                close(pfd);
++            }
++        }
++    }
+ 
+@@ (in mud_send_path, at the top, replacing the unconditional use of mud->fd)
+-    ssize_t ret = sendmsg(mud->fd, &msg, flags);
++    int send_fd = (path->fd != -1) ? path->fd : mud->fd;
++
++    if (path->fd != -1) {
++        /* MeshLink: the socket IS the path. IP_PKTINFO source selection is
++           meaningless under fwmark routing and must not be attached. */
++        msg.msg_control = NULL;
++        msg.msg_controllen = 0;
++    }
++
++    ssize_t ret = sendmsg(send_fd, &msg, flags);
+ 
+@@ (in the path teardown / reset site where a path leaves MUD_UP,
+    e.g. mud_path_update on expiry or mud_set_path with MUD_DOWN)
+     path->state = MUD_DOWN;
++
++    /* MeshLink: release the dedicated socket with the path. */
++    if (path->fd != -1) {
++        close(path->fd);
++        path->fd = -1;
++    }
+ 
+diff --git a/mud.h b/mud.h
+--- a/mud.h
++++ b/mud.h
+@@ (public API, after mud_recv declaration)
+ int mud_recv(struct mud *mud, void *data, size_t size);
++int mud_get_fds(struct mud *mud, int *fds, int count);  /* MeshLink: all pollable fds */
+ 
+diff --git a/mud.c b/mud.c
+--- a/mud.c
++++ b/mud.c
+@@ (in mud_recv: change from single-socket recv to multi-fd sweep)
+-    ssize_t ret = recvmsg(mud->fd, &msg, flags);
++    /* MeshLink: with socket-per-path, packets may arrive on any path fd.
++       Sweep: primary fd first, then each path fd, nonblocking. All sockets
++       are O_NONBLOCK; caller polls via mud_get_fds(). */
++    ssize_t ret = recvmsg(mud->fd, &msg, flags);
++
++    if (ret <= 0 && mud_android_enabled()) {
++        for (unsigned i = 0; i < MUD_PATH_MAX; i++) {
++            struct mud_path *p = &mud->paths[i];
++            if (p->state <= MUD_DOWN || p->fd == -1)
++                continue;
++            ret = recvmsg(p->fd, &msg, flags);
++            if (ret > 0)
++                break;
++        }
++    }
+ 
+@@ (append at end of mud.c)
++int
++mud_get_fds(struct mud *mud, int *fds, int count)
++{
++    int n = 0;
++    if (n < count)
++        fds[n++] = mud->fd;
++    for (unsigned i = 0; i < MUD_PATH_MAX && n < count; i++) {
++        if (mud->paths[i].state > MUD_DOWN && mud->paths[i].fd != -1)
++            fds[n++] = mud->paths[i].fd;
++    }
++    return n;
++}
+diff --git a/src/gt.c b/src/gt.c
+--- a/src/gt.c
++++ b/src/gt.c
+@@ (in the main event loop where the mud fd is added to the poll/select set)
+-    fds[1].fd = mud_get_fd(mud);
+-    fds[1].events = POLLIN;
++    /* MeshLink: poll every mud socket (primary + per-path). */
++    int mud_fds[16];
++    int mud_nfds = mud_get_fds(mud, mud_fds, 16);
++    for (int i = 0; i < mud_nfds; i++) {
++        fds[1 + i].fd = mud_fds[i];
++        fds[1 + i].events = POLLIN;
++    }
+
+# ============================================================================
+# BUILD NOTES (from the source AI — read before applying)
+# ============================================================================
+# 1. mud_addr_to_sockaddr / mud_addr_to_str: glorytun v0.3.4's vendored mud has
+#    internal addr-conversion helpers with slightly different names
+#    (e.g. mud_localaddr, inline conversions). If the build errors on these two
+#    symbols, repoint them at the checkout's equivalents. This is the ONLY spot
+#    coupled to internal naming that isn't guaranteed.
+# 2. The recv sweep is O(paths). With 2 paths that is negligible — do not optimize.
+# 3. Per-path sockets bind port 0 (ephemeral). The server's mud identifies paths
+#    by (addr:port, key), so each radio arriving from a different source port is
+#    expected and correct — that is how it distinguishes paths.
+#
+# These hunks use CONTEXT ANCHORS ("in mud_create, immediately after...") rather
+# than exact line numbers, so this is a GUIDED patch, not a clean `git apply`.
+# Apply each hunk by locating the described anchor in the vendored mud source.

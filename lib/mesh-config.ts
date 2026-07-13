@@ -10,6 +10,11 @@ export interface BondConfig {
   key: string
   // Auto-start the bond when the app launches
   autoConnect: boolean
+  // "Accelerator" — request the optimized transport profile (larger buffers,
+  // MTU probing) to pair with the server-side tuning in accelerator-tune.sh.
+  accelerator: boolean
+  // MeshDrop relay port on the VPS (meshdrop-relay.js). 0/undefined = demo mode.
+  relayPort: number
 }
 
 export const DEFAULT_CONFIG: BondConfig = {
@@ -18,6 +23,8 @@ export const DEFAULT_CONFIG: BondConfig = {
   port: 5000,
   key: '',
   autoConnect: false,
+  accelerator: true,
+  relayPort: 0,
 }
 
 const STORAGE_KEY = 'meshlink.bondConfig.v1'

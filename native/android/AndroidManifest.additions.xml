@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MeshLink native additions.
+  MERGED into android/app/src/main/AndroidManifest.xml by
+  native/scripts/merge-manifest.py after `cap add android`.
+
+  Wrapped in a single <additions> root so it parses as valid XML
+  (the merger reads the children and inserts them into the real manifest;
+  the <additions> wrapper itself is never copied).
+-->
+<additions xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Permissions: merger inserts these into <manifest>, before <application> -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Needed to share connectivity to peers (Stage 3): -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+
+    <!-- MeshDrop media sharing. Android 13+ (API 33) uses granular media
+         permissions; older devices fall back to READ_EXTERNAL_STORAGE capped
+         at API 32 so Play/lint don't flag it. Picking via the system picker
+         needs no permission, but these let us read the gallery for previews
+         and let the user grant access when prompted. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Service: merger inserts this into <application> -->
+    <service
+        android:name="com.meshlink.app.bond.BondVpnService"
+        android:permission="android.permission.BIND_VPN_SERVICE"
+        android:foregroundServiceType="specialUse"
+        android:exported="false">
+        <intent-filter>
+            <action android:name="android.net.VpnService" />
+        </intent-filter>
+        <property
+            android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+            android:value="Network connection bonding VPN" />
+    </service>
+
+</additions>

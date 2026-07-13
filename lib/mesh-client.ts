@@ -8,14 +8,13 @@
 // The UI only depends on this interface, so going live is a drop-in swap.
 
 import {
-  INITIAL_UPLINKS,
-  INITIAL_DEVICES,
   tickUplinks,
   buildSnapshot,
   type Uplink,
   type MeshSnapshot,
 } from './mesh-data'
 import type { BondConfig } from './mesh-config'
+import { installNativeBridge } from './native-adapter'
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
@@ -33,7 +32,8 @@ export interface MeshClient {
 
 class SimulatedMeshClient implements MeshClient {
   readonly mode = 'simulated' as const
-  private uplinks: Uplink[] = INITIAL_UPLINKS.map((u) => ({ ...u }))
+  // No preset gear — nothing to simulate until a real source reports in.
+  private uplinks: Uplink[] = []
   private state: ConnectionState = 'disconnected'
 
   async connect(): Promise<void> {
@@ -68,14 +68,14 @@ class SimulatedMeshClient implements MeshClient {
         latencyMs: 0,
       }))
     }
-    return buildSnapshot(this.uplinks, INITIAL_DEVICES)
+    return buildSnapshot(this.uplinks, [])
   }
 }
 
 // ---- Native bridge client (Capacitor build) ----
 // Expected shape of the injected plugin. Implemented in Kotlin/Swift.
 interface NativeBonding {
-  connect(opts: { host: string; port: number; key: string }): Promise<void>
+  connect(opts: { host: string; port: number; key: string; accelerator: boolean }): Promise<void>
   disconnect(): Promise<void>
   getSnapshot(): MeshSnapshot
   getState(): ConnectionState
@@ -93,7 +93,12 @@ class NativeMeshClient implements MeshClient {
   constructor(private native: NativeBonding) {}
 
   async connect(config: BondConfig): Promise<void> {
-    await this.native.connect({ host: config.host, port: config.port, key: config.key })
+    await this.native.connect({
+      host: config.host,
+      port: config.port,
+      key: config.key,
+      accelerator: config.accelerator,
+    })
   }
   async disconnect(): Promise<void> {
     await this.native.disconnect()
@@ -115,10 +120,15 @@ let client: MeshClient | null = null
 // plugin installed, otherwise the in-browser simulation.
 export function getMeshClient(): MeshClient {
   if (client) return client
-  if (typeof window !== 'undefined' && window.MeshBonding) {
-    client = new NativeMeshClient(window.MeshBonding)
-  } else {
-    client = new SimulatedMeshClient()
+  if (typeof window !== 'undefined') {
+    // Installs window.MeshBonding when inside the native Android shell.
+    // No-op in the browser, so the preview stays in simulation mode.
+    installNativeBridge()
+    if (window.MeshBonding) {
+      client = new NativeMeshClient(window.MeshBonding)
+      return client
+    }
   }
+  client = new SimulatedMeshClient()
   return client
 }
